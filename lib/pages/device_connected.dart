@@ -39,29 +39,26 @@ class _DeviceConnectedState extends State<DeviceConnected> with TickerProviderSt
       lowerBound: 0.1,
 
     )..forward();
-    widget.device.connect();
 
-   readFileAsync('assets/convMat.json').then((val)=> _assignConvMat(val['convMat'])) ;
+    readFileAsync('assets/convMat.json').then((val)=> _assignConvMat(val['convMat'])) ;
     readFileAsync('assets/transMat.json').then((val){
-      _assignTransMat(val['transMat'])
-    ;}) ;
+      _assignTransMat(val['transMat']);
+    });
     readFileAsync('assets/convMat2.json').then((val){
-     _assignConv2Mat(val['convMat2']);
-    }) ;
+      _assignConv2Mat(val['convMat2']);
+    });
 
-    //data = loadAsset();
     chartData.add(FlSpot(0.0, 0.0));
     readingSpectrum = false;
     currentSPM.add(0.01);
     luxData = [0,0,0,0,0,0];
     CCTData = [0,0,0];
     _characteristicSet = false;
+    _deviceConnectedAndReady = false;
 
     _controller.addListener(() {
-
       setState(() {
         spotSize = _controller.value*10;
-
       });
     }
     );
@@ -74,6 +71,48 @@ class _DeviceConnectedState extends State<DeviceConnected> with TickerProviderSt
         }*/
       });
     });
+
+    ///connect to device and discover services
+    widget.device.connect().then((val) {
+      widget.device.state.listen((BluetoothDeviceState connectionState){
+        switch (connectionState) {
+          case BluetoothDeviceState.connected:
+
+            print("Connected!");
+            ///search for services
+            widget.device.discoverServices().then((val){
+
+              widget.device.services.listen( (List<BluetoothService> bluetoothServices) {
+                bluetoothServices.forEach((service){
+                  List<BluetoothCharacteristic> bluetoothCharacteristics;
+                  bluetoothCharacteristics = service.characteristics;
+                  bluetoothCharacteristics.forEach((characteristic){
+                    if (characteristic.uuid.toString().contains('0000cccc-5555-8888-2299-ba0987654321')){
+                      print("Correct Service and characterisic found!");
+                      deviceCharacteristic = characteristic;
+                      characteristic.setNotifyValue(true).then((val){
+                        _deviceConnectedAndReady = true;
+                        print("Notification Set!");
+                      });
+
+                    }
+                  });
+                });
+              });
+            });
+            break;
+          case BluetoothDeviceState.disconnected:
+            print("DisConnected");
+            break;
+          default:
+            print("Connecting");
+            break;
+        }
+      });
+    });
+
+
+
   }
 
 
@@ -97,7 +136,8 @@ class _DeviceConnectedState extends State<DeviceConnected> with TickerProviderSt
     return loading;
   }
   double spotSize;
-
+  bool _deviceConnectedAndReady;
+  BluetoothCharacteristic deviceCharacteristic;
   void _assignConvMat(List<dynamic> val){
     setState(() {
       convMat = val;
@@ -197,7 +237,7 @@ class _DeviceConnectedState extends State<DeviceConnected> with TickerProviderSt
       minX: 360,
       maxX: 780,
       minY: 0,
-      maxY: currentSPM.reduce(max),
+      maxY: (currentSPM != null) ? currentSPM.reduce(max): 1.0,
       lineBarsData: [
         LineChartBarData(
           spots: chartData,
@@ -350,7 +390,7 @@ class _DeviceConnectedState extends State<DeviceConnected> with TickerProviderSt
         appBar: AppBar(
           title: Text("WLSS Gamma"),
           actions: <Widget>[
-            StreamBuilder<BluetoothDeviceState>(
+            /*StreamBuilder<BluetoothDeviceState>(
               stream:  widget.device.state.asBroadcastStream(),
               initialData: BluetoothDeviceState.connecting,
               builder: (c, snapshot) {
@@ -381,7 +421,7 @@ class _DeviceConnectedState extends State<DeviceConnected> with TickerProviderSt
                           .copyWith(color: Colors.white),
                     ));
               },
-            )
+            )*/
           ],
           bottom: TabBar(
             tabs: [
@@ -401,11 +441,119 @@ class _DeviceConnectedState extends State<DeviceConnected> with TickerProviderSt
         body: Center(
           child: TabBarView(
               children: [
-                Column(
+                _deviceConnectedAndReady ? Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: <Widget>[
-
                     Container(
+                      child: LineChart(
+                        mainData(),
+                      ),
+                      width: double.infinity,
+                    ),
+                    Container(
+                      child:RaisedButton(
+                        //color: Colors.green,
+                          shape:RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+
+                          ),
+                          child: Text(
+                            "Measure",
+                            style:TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20),
+                          ),
+
+                          onPressed: () {
+                            setState(() {
+                              readingSpectrum = true;
+                            });
+                            List<double> spm = [];
+                            deviceCharacteristic.write([0x35]);
+                            int val = 0;
+                            print("Written to Device");
+                            deviceCharacteristic.value.distinct()
+                                .asBroadcastStream()
+                                .listen((v) {
+                              if (v.length > 1) {
+                                if (v[1] == val &&
+                                    v[0] == 207) {
+                                  ByteBuffer buffer = new Int8List
+                                      .fromList(v).buffer;
+                                  ByteData byteData1 = new ByteData
+                                      .view(buffer, 2, 4);
+                                  ByteData byteData2 = new ByteData
+                                      .view(buffer, 6, 4);
+                                  ByteData byteData3 = new ByteData
+                                      .view(buffer, 10, 4);
+                                  ByteData byteData4 = new ByteData
+                                      .view(buffer, 14, 4);
+                                  double x;
+                                  x = byteData1.getFloat32(
+                                      0);
+                                  spm.add(x);
+                                  x = byteData2.getFloat32(
+                                      0);
+                                  spm.add(x);
+                                  x = byteData3.getFloat32(
+                                      0);
+                                  spm.add(x);
+                                  x = byteData4.getFloat32(
+                                      0);
+                                  spm.add(x);
+                                  val++;
+                                  if (v[1] == 6) {
+                                    List<double> spm14 = [];
+                                    spm14.addAll(
+                                        spm.take(14));
+                                    print('data: $spm14');
+                                    double sum = 0;
+                                    spm14.forEach((f) => sum += f);
+
+                                    if (sum > 0) {
+                                      LinkedHashMap map = LinkedHashMap();
+                                      map['spm14'] = spm14;
+                                      map['convMat'] =
+                                          convMat;
+                                      map['transMat'] =
+                                          transMat;
+                                      //map['convMat2'] = convMat2.toList().cast<double>().toList().cast<double>();
+                                      _getSPM(map);
+                                      if (currentSPM !=
+                                          null) {
+                                        print(currentSPM);
+                                        setState(() {
+                                          currentSPM = null;
+                                        });
+                                      }
+                                    }else{
+                                      setState(() {
+                                        FlSpot val;
+                                        chartData.clear();
+                                        currentSPM = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+                                        for(int i=0;i<401;i++){
+                                          val = FlSpot(
+                                              i.toDouble()+360,
+                                              currentSPM[i]);
+                                          chartData.add(val);
+                                        }
+                                        //luxData = calculateLux(currentSPM);
+                                        luxData =[0,0,0,0,0,0];
+                                        CCTData =[0,0,0];
+                                        //CCTData = calculateCCT(currentSPM);
+                                        readingSpectrum = false;
+                                      });
+                                    }
+                                  }
+                                }
+                              }
+                            });
+                          }
+                      ),
+                      margin: EdgeInsets.only(top: 50.0),
+                      height: 80.0,
+                      width: 300,
+                    ),
+
+                    /*Container(
 
                       //height: 500,
                       margin: new EdgeInsets.only(left: 5, right: 5),
@@ -628,8 +776,11 @@ class _DeviceConnectedState extends State<DeviceConnected> with TickerProviderSt
                           //return Text("now");
                         },
                       ),
-                    ),
+                    ),*/
                   ],
+                ): SpinKitWave(
+                  color: Colors.red,
+                  size: 100.0,
                 ),
                 AspectRatio(
                 aspectRatio: 1.7,
