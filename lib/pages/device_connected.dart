@@ -14,6 +14,7 @@ import 'package:flutter/foundation.dart';
 import 'dart:collection';
 import 'package:charts_flutter/flutter.dart' as charts;
 import 'package:flutter/material.dart';
+import 'package:percent_indicator/percent_indicator.dart';
 
 
 class DeviceConnected extends StatefulWidget {
@@ -91,6 +92,51 @@ class _DeviceConnectedState extends State<DeviceConnected> with TickerProviderSt
                       print("Correct Service and characterisic found!");
                       deviceCharacteristic = characteristic;
                       characteristic.setNotifyValue(true).then((val){
+
+                        deviceCharacteristic.write([0x61]);
+                        deviceCharacteristic.value.distinct()
+                            .asBroadcastStream()
+                            .listen((v) {
+                          //print(v);
+                          if (v.length > 1) {
+                            //print(v);
+                            if (v[0] == 225 && v[1] == 0) {
+                              ByteBuffer buffer = new Int8List
+                                  .fromList(v).buffer;
+                              ByteData byteData1 = new ByteData
+                                  .view(buffer, 2, 2);
+
+                              int x = byteData1.getUint16(0);
+                              batteryPerc = ((((x / 100) - 3.1) / 1.1));
+
+                              //print(batteryPerc);
+                            }
+                          }
+                        });
+                        ///get battery percentage
+                        Timer.periodic(Duration(seconds: 10), (timer) {
+                          deviceCharacteristic.write([0x61]);
+                          deviceCharacteristic.value.distinct()
+                              .asBroadcastStream()
+                              .listen((v) {
+                            //print(v);
+                            if (v.length > 1) {
+                              //print(v);
+                              if (v[0] == 225 && v[1] == 0) {
+                                ByteBuffer buffer = new Int8List
+                                  .fromList(v).buffer;
+                              ByteData byteData1 = new ByteData
+                                  .view(buffer, 2, 2);
+
+                              int x = byteData1.getUint16(0);
+                                batteryPerc = ((((x / 100) - 3.1) / 1.1));
+
+                            //print(batteryPerc);
+                              }
+                            }
+                          });
+
+                        });
                         _deviceConnectedAndReady = true;
                         print("Notification Set!");
                       });
@@ -129,6 +175,7 @@ class _DeviceConnectedState extends State<DeviceConnected> with TickerProviderSt
   List<double> luxData;
   List<double> CCTData;
   List<charts.Series<dynamic, String>> barData;
+  double batteryPerc;
   bool _isLoading (){
     setState(() {
 
@@ -444,6 +491,22 @@ class _DeviceConnectedState extends State<DeviceConnected> with TickerProviderSt
                 _deviceConnectedAndReady ? Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: <Widget>[
+                    Container(
+                      child: CircularPercentIndicator(
+                        radius: 90.0,
+                        lineWidth: 10.0,
+                        addAutomaticKeepAlive: true,
+                        animateFromLastPercent: true,
+                        animation: true,
+                        circularStrokeCap: CircularStrokeCap.round,
+                        footer: Text("Battery Level"),
+                        percent: (batteryPerc != null) ? batteryPerc: 0.0,
+                        center: new Text((batteryPerc != null) ? (batteryPerc*100).toStringAsPrecision(2) +"%": "0 %"),
+                        progressColor: Colors.redAccent,
+                      ),
+                      width: double.infinity,
+                      padding: EdgeInsets.only(bottom: 40),
+                    ),
                     Container(
                       child: LineChart(
                         mainData(),
